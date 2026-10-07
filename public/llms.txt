@@ -1,0 +1,16 @@
+# Velcotiy Techniques Inc
+
+> Canadian final-mile delivery and delivery operations business. Velcotiy coordinates warehouse pickup, fleet, drivers, dispatch and delivery from warehouse to doorstep. Availability varies by route and operating area; contact the team to confirm current service coverage.
+
+Website: https://velcotiytechniques.ca/
+
+## Pages
+- [Services](https://velcotiytechniques.ca/services): final-mile delivery, same-day delivery, warehouse-to-doorstep delivery, distribution, delivery operations, driver management, dedicated fleet and EV delivery options.
+- [Business delivery](https://velcotiytechniques.ca/carriers): delivery support for warehouses, distribution centres, ecommerce and retail fulfillment.
+- [Fleet](https://velcotiytechniques.ca/fleet): vehicle categories and route fit.
+- [Coverage](https://velcotiytechniques.ca/coverage): inquire about current service availability.
+- [About](https://velcotiytechniques.ca/about): company approach and mission.
+- [Drivers](https://velcotiytechniques.ca/drivers): driver interest and application.
+- [Careers](https://velcotiytechniques.ca/careers): current openings.
+- [Contact](https://velcotiytechniques.ca/contact): business inquiries.
+- [Get a Quote](https://velcotiytechniques.ca/quote): delivery requirements form.
