@@ -1,7 +1,7 @@
 import {media} from '../config/media';
 export type FleetCategory = 'Electric'|'Passenger'|'Cargo';
 export const fleet = [
-  {name:'EV Sedan',category:'Electric',power:'Electric',use:'Urban efficiency',description:'Efficient urban final-mile routes designed for lighter parcel volumes.',image:media.fleet.evSedan,imageSmall:media.fleet.evSedan.replace('.webp','-768.webp')},
+  {name:'EV',category:'Electric',power:'Electric',use:'Urban efficiency',description:'Efficient urban final-mile routes designed for lighter parcel volumes.',image:media.fleet.evSedan,imageSmall:media.fleet.evSedan.replace('.webp','-768.webp')},
   {name:'Sedan',category:'Passenger',power:'Conventional / hybrid',use:'Same-day agility',description:'Fast, agile movement for smaller parcel loads.',image:media.fleet.sedan,imageSmall:media.fleet.sedan.replace('.webp','-768.webp')},
   {name:'SUV / Crossover',category:'Passenger',power:'Mixed powertrain',use:'Flexible routes',description:'Adaptable space for varied route requirements.',image:media.fleet.suv,imageSmall:media.fleet.suv.replace('.webp','-768.webp')},
   {name:'Compact Cargo',category:'Cargo',power:'Mixed powertrain',use:'Dense city routes',description:'A compact cargo format for efficient neighborhood delivery.',image:media.fleet.compactCargo,imageSmall:media.fleet.compactCargo.replace('.webp','-768.webp')},

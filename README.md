@@ -34,7 +34,7 @@ After deployment, open `/careers` directly in a fresh browser tab and refresh it
 | Page metadata and structured data | `src/components/common/SEO.tsx` |
 | Responsive styling | `src/styles/` |
 
-Contact, quote, and driver forms validate in the browser and open an email draft addressed to `info@velcotiytechniques.ca`. The visitor reviews and sends the draft in their email app. The site does not store or submit form data to a backend.
+Contact and quote forms validate in the browser and open an email draft addressed to `info@velcotiytechniques.ca`. The driver form opens a prefilled WhatsApp message for the applicant to review and send. The site does not store or submit form data to a backend.
 
 ## Launch checks
 
