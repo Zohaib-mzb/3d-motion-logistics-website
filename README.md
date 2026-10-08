@@ -15,6 +15,12 @@ npm run preview
 
 Deploy `dist/` to a static host configured to serve `index.html` for client-side routes. The canonical origin is `https://velcotiytechniques.ca`; update `src/config/siteConfig.ts` only if the production domain changes. `public/robots.txt`, `public/sitemap.xml`, and `public/llms.txt` use the same origin.
 
+## Hostinger SPA Routing
+
+This site uses React Router with clean URLs. For static hosting under Hostinger's Apache-compatible `public_html`, deploy the **contents** of `dist/` to `public_html/`, including the hidden `dist/.htaccess` file. Vite copies it from `public/.htaccess` during the build. The rule serves existing files and directories normally and internally serves `/index.html` for other paths, preserving URLs such as `/careers` for React Router. Do not remove this file.
+
+After deployment, open `/careers` directly in a fresh browser tab and refresh it. Also check `/robots.txt` and a built `/assets/` file. If Hostinger's Web App deployment replaces or ignores the included `.htaccess`, ensure the live `public_html/.htaccess` contains the same rewrite rule or configure its equivalent SPA fallback: unknown paths must internally serve `/index.html` while the browser URL stays unchanged. Check the generated server configuration in Hostinger before treating the live issue as resolved.
+
 ## Where to edit
 
 | Content | File |
