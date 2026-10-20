@@ -24,7 +24,7 @@ The website focuses on:
 - direct-link routing on Hostinger
 - production-focused frontend performance
 
-The project is intentionally lightweight and frontend-first. It avoids unnecessary backend infrastructure while still supporting quote requests, contact workflows, and driver applications.
+The project uses a lightweight frontend with a small PHP endpoint for driver application email. Contact and quote requests use email drafts.
 
 ---
 
@@ -43,7 +43,7 @@ The project is intentionally lightweight and frontend-first. It avoids unnecessa
 - Canadian delivery coverage visualization
 - Business / warehouse solutions page
 - Driver application form with validation
-- WhatsApp application handoff for drivers
+- Direct driver application email through a PHP endpoint
 - Multi-step quote request form
 - Contact form with email-draft workflow
 - Careers page
@@ -156,9 +156,7 @@ The driver form collects:
 - emergency contact
 - additional notes
 
-After validation, the website prepares a structured WhatsApp message containing the application details.
-
-The applicant reviews the message and presses **Send** inside WhatsApp.
+After validation, the website posts the application to `/api/driver-application.php`. The endpoint validates it and sends an email to `info@velcotiytechniques.ca` through SMTP. The site shows success only after the SMTP server accepts the message.
 
 No driver application data is intentionally stored by this website.
 
@@ -241,7 +239,7 @@ Performance decisions include:
 - Vite production bundling
 - reduced-motion support
 - removal of missing/unused media references
-- minimal frontend-only architecture
+- lightweight frontend with a small PHP mail endpoint
 
 ---
 
@@ -388,13 +386,13 @@ public/
 
 This repository contains public-facing frontend code for a client business website.
 
-- No private API keys are required by the site.
+- SMTP credentials are required server-side for driver application email and must never be exposed in frontend code.
 - No backend database is used for public forms.
 - Local environment files are ignored by Git.
 - `node_modules/`, `dist/`, logs, and OS metadata are excluded from Git.
 - Public business contact information may exist in frontend source because it is intentionally displayed on the public website.
 - Contact and quote form data is not stored by the application.
-- Driver application data is prepared locally and handed off to WhatsApp for the applicant to send.
+- Driver application data is processed by the PHP endpoint and sent by email; this website does not intentionally persist it.
 - Secrets, passwords, access tokens, private keys, and credentials should never be committed to this repository.
 
 ---
@@ -416,7 +414,7 @@ The website is also manually tested for:
 - direct route loading
 - navigation
 - forms
-- WhatsApp handoff
+- driver application submission and failure state
 - quote flow
 - SPA routing
 - 404 handling
@@ -474,3 +472,13 @@ This project was developed for **Velcotiy Techniques Inc** as a production busin
 This repository is publicly viewable for portfolio and engineering-reference purposes.
 
 The Velcotiy Techniques Inc brand, logo, generated visuals, business content, and proprietary assets are not automatically licensed for reuse.
+
+---
+
+## Driver application email on Hostinger
+
+The driver form posts JSON to `/api/driver-application.php` on the same origin. Deploy `dist/` contents, including `api/driver-application.php` and `.htaccess`, to a **PHP 8.1+ enabled Apache `public_html`** environment. The existing SPA fallback serves `/drivers` while the physical PHP file handles `/api/driver-application.php`. A static-only Web App deployment cannot execute this endpoint; confirm PHP support in the actual Hostinger plan before enabling the form in production.
+
+Configure these **server-side** environment variables in the PHP runtime: `SMTP_HOST`, `SMTP_PORT` (use 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, and `DRIVER_APPLICATION_TO=info@velcotiytechniques.ca`. The endpoint requires an SMTP server supporting STARTTLS and AUTH LOGIN. Set `SMTP_FROM` to the authenticated business mailbox or a verified sender. Keep credentials outside `public_html`, Git, and all `VITE_*` variables. `.env.example` lists names only; PHP does not load it automatically. If Hostinger cannot expose environment variables to PHP, configure them in a protected server configuration outside the web root before deployment.
+
+A successful endpoint response means the SMTP server accepted the message, not that the recipient mailbox delivered it. Confirm with a real application and inspect the destination inbox and spam folder after deployment. Without PHP support and live SMTP credentials, the driver form will display its error state and retain entered data. Contact and quote still open email drafts; general WhatsApp links are unchanged.

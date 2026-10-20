@@ -3,7 +3,7 @@ import {useForm} from 'react-hook-form';
 import {zodResolver} from '@hookform/resolvers/zod';
 import {z} from 'zod';
 import {Check,ArrowRight,ArrowLeft} from 'lucide-react';
-import {createDriverWhatsAppUrl,submitInquiry,type FormKind} from '../../lib/submissions';
+import {submitInquiry,type FormKind} from '../../lib/submissions';
 const field=z.string().trim().max(500,'Please use fewer than 500 characters.');
 const schema=z.object({name:field,company:field,contactName:field,email:z.union([z.literal(''),z.email('Enter a valid email.')]),phone:field,inquiryType:field,province:field,city:field,citiesServed:field,fleetSize:field,vehicleTypes:field,capacity:field,yearsOperating:field,vehicleType:field,availability:field,experience:field,message:field.max(2000),website:field});
 type Values=z.infer<typeof schema>;
@@ -33,13 +33,22 @@ const vehicleOptions=['EV','Sedan','SUV / Crossover','Compact Cargo','Cargo Van'
 const weeklyOptions=Array.from({length:7},(_,index)=>`${index+1} day${index===0?'':'s'} per week`);
 
 function DriverForm(){
-  const [ready,setReady]=useState(false);
-  const {register,handleSubmit,formState:{errors,isSubmitting}}=useForm<DriverValues>({resolver:zodResolver(driverSchema),defaultValues:driverDefaults});
-  const onSubmit=(data:DriverValues)=>{
-    if(data.website)return;
-    window.open(createDriverWhatsAppUrl(data),'_blank','noopener,noreferrer');
-    setReady(true);
+  const [sent,setSent]=useState(false);
+  const [sendError,setSendError]=useState(false);
+  const {register,handleSubmit,reset,formState:{errors,isSubmitting}}=useForm<DriverValues>({resolver:zodResolver(driverSchema),defaultValues:driverDefaults});
+  const onSubmit=async(data:DriverValues)=>{
+    setSendError(false);
+    try {
+      const response=await fetch('/api/driver-application.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+      if(!response.ok)throw new Error(`Driver application request failed: ${response.status}`);
+      const result:unknown=await response.json();
+      if(!result||typeof result!=='object'||!('sent' in result)||result.sent!==true)throw new Error('Driver application was not confirmed');
+      setSent(true);
+    } catch {
+      setSendError(true);
+    }
   };
+  if(sent)return <div className="form-success" role="status"><span><Check aria-hidden="true"/></span><h3>Application sent.</h3><p>Your driver application has been sent to Velcotiy. Our team can contact you if there is a suitable opportunity.</p><button type="button" className="button button--primary" onClick={()=>{reset();setSent(false)}}>Submit another application</button></div>;
   return <form className="inquiry-form" onSubmit={handleSubmit(onSubmit)} noValidate>
     <div className="form-grid">
       <label><span>Full Name *</span><input {...register('name')} required/><small>{errors.name?.message}</small></label>
@@ -58,9 +67,9 @@ function DriverForm(){
       <label className="full"><span>Additional Notes</span><textarea {...register('message')} rows={5}/><small>{errors.message?.message}</small></label>
     </div>
     <input className="honeypot" {...register('website')} tabIndex={-1} autoComplete="off" aria-hidden="true"/>
-    <p className="form-note">Your details open in WhatsApp for you to review and send. This site does not store them.</p>
-    <button className="button button--primary" disabled={isSubmitting} type="submit">{isSubmitting?'Preparing…':'Send via WhatsApp'} <ArrowRight size={17}/></button>
-    {ready&&<p role="status">Your application details are ready in WhatsApp. Review the message and press Send to submit.</p>}
+    <p className="form-note">Your application will be securely sent to the Velcotiy team.</p>
+    <button className="button button--primary" disabled={isSubmitting} type="submit">{isSubmitting?'Sending…':'Send Application'} <ArrowRight size={17}/></button>
+    {sendError&&<p role="alert">We couldn’t send your application right now. Please try again.</p>}
   </form>;
 }
 const quoteSchema=z.object({company:z.string().trim().min(2),name:z.string().trim().min(2),email:z.email(),phone:z.string().trim().min(7),pickupCity:z.string().trim().min(2),province:z.string().trim().min(2),warehouse:z.string().trim(),region:z.string().trim().min(2),volume:z.string().trim().min(1),frequency:z.string().trim().min(1),sameDay:z.string(),packageType:z.string().trim(),parcelSize:z.string().trim(),vehicle:z.string(),notes:z.string().trim().max(2000),preference:z.string()});
