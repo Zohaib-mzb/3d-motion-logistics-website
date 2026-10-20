@@ -7,3 +7,6 @@ dist/
 *.log
 
 !.env.example
+mail-config.php
+private/
+*.local.php
