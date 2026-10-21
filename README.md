@@ -156,7 +156,7 @@ The driver form collects:
 - emergency contact
 - additional notes
 
-After validation, the website posts the application to `/api/driver-application.php`. The endpoint validates it and sends an email to `info@velcotiytechniques.ca` through SMTP. The site shows success only after the SMTP server accepts the message.
+After validation, the website posts the application to `/api/driver-application.php`. The endpoint validates it and sends it to `info@velcotiytechniques.ca` through the Brevo transactional email HTTPS API. The site shows success only after Brevo returns HTTP 201 with a message ID.
 
 No driver application data is intentionally stored by this website.
 
@@ -386,7 +386,7 @@ public/
 
 This repository contains public-facing frontend code for a client business website.
 
-- SMTP credentials are required server-side for driver application email and must never be exposed in frontend code.
+- A Brevo API key is required server-side for driver application email and must never be exposed in frontend code.
 - No backend database is used for public forms.
 - Local environment files are ignored by Git.
 - `node_modules/`, `dist/`, logs, and OS metadata are excluded from Git.
@@ -477,12 +477,10 @@ The Velcotiy Techniques Inc brand, logo, generated visuals, business content, an
 
 ## Driver application email on Hostinger
 
-The driver form posts JSON to `/api/driver-application.php` on the same origin. Deploy the contents of `dist/`, including `api/driver-application.php` and `.htaccess`, to a PHP 8.1+ enabled Hostinger `public_html`. The SPA fallback continues to serve `/drivers`; the physical PHP file handles the API request.
+The driver form posts JSON to `/api/driver-application.php` on the same origin. The PHP endpoint validates the application and sends it to `https://api.brevo.com/v3/smtp/email` over HTTPS using PHP cURL. It shows success only when Brevo returns HTTP 201 with a nonempty `messageId`. That confirms provider acceptance, not inbox placement. The frontend does not receive the API key or send applicant data to analytics or URLs; the website does not store applications. Brevo necessarily processes the application for delivery.
 
-The endpoint first reads `SMTP_HOST`, `SMTP_PORT`, `SMTP_ENCRYPTION`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, and `DRIVER_APPLICATION_TO` from PHP's server environment. If required values are missing, it fills them from a private PHP config file. `SMTP_ENCRYPTION` is optional in the environment: port 465 defaults to `ssl`, other ports to `tls`. The SMTP username is the **full mailbox address**, and the password is the **mailbox password**. The recipient must be `info@velcotiytechniques.ca`. Credentials must remain outside Git and the public web root; never use `VITE_*` variables for them.
+Deploy the **contents** of `dist/`, including `api/driver-application.php` and `.htaccess`, to a PHP 7.4+ enabled Hostinger `public_html` with the PHP cURL extension enabled. The existing SPA fallback continues to serve `/drivers`, while the physical PHP file handles the API request. Contact and Quote still open email drafts; general WhatsApp links are unchanged.
 
-The default private config location is `../private/mail-config.php` relative to PHP's `DOCUMENT_ROOT`. For example, if the document root is `/home/USERNAME/domains/velcotiytechniques.ca/public_html`, create `/home/USERNAME/domains/velcotiytechniques.ca/private/mail-config.php`. Copy the structure from `server/mail-config.example.php` and enter the real mailbox details **only in the private Hostinger file**. If you instead keep the private file at `/home/USERNAME/private/mail-config.php`, set the server-side `MAIL_CONFIG_PATH` environment variable to that absolute path. The endpoint resolves and rejects any config path inside the public web root. The example file is not deployed by Vite.
+The endpoint reads `BREVO_API_KEY` from the server environment first. If it is absent, it reads a private PHP config file. By default, this is `../private/mail-config.php` relative to PHP's `DOCUMENT_ROOT`: for `/home/USERNAME/domains/velcotiytechniques.ca/public_html`, create `/home/USERNAME/domains/velcotiytechniques.ca/private/mail-config.php`. Copy the structure in `server/mail-config.example.php` into that private file and enter the real key **only on Hostinger**. If the file is elsewhere outside `public_html`, set server-side `MAIL_CONFIG_PATH` to its absolute path. Paths inside the public web root are rejected. The example file is not deployed by Vite. Never put the real key in Git, `public_html`, or a `VITE_*` variable.
 
-Hostinger SMTP settings: `smtp.hostinger.com` with port **465** and `ssl`, or port **587** and `tls` (STARTTLS). The endpoint uses authenticated SMTP and sets Reply-To to the applicant's email. It returns success only after the SMTP server accepts the message; final inbox delivery should be checked separately. Contact and quote still open email drafts, and general WhatsApp links remain unchanged.
-
-To check the live deployment, open `/api/driver-application.php` in a browser: `{"sent":false}` with HTTP 405 confirms the endpoint exists, but does **not** test SMTP. Then submit one valid application from `/drivers` and confirm that it reaches `info@velcotiytechniques.ca` (check spam/junk too). A failed send keeps the form data; review Hostinger's PHP error log for the safe `driver-mail` category. Do not put a real password in a test request or browser console. When PHP CLI is available, run `php server/tests/driver-mail.php` for the local config and validation checks; the test uses placeholder credentials and sends no email.
+In Brevo, verify `info@velcotiytechniques.ca` as a sender and authenticate `velcotiytechniques.ca` as a sending domain. If Brevo asks for DNS records, copy the exact records it supplies into the domain's authoritative DNS settings (Hostinger DNS if Hostinger hosts DNS); do not invent record values. Then create a transactional API key. A test GET of `/api/driver-application.php` should return HTTP 405 and `invalid_request`; this checks the route, **not** email delivery. Submit one clearly marked test application at `/drivers`, inspect the response in Network tools, and confirm receipt in the mailbox or spam folder. The test suite can be run with `php server/tests/driver-mail.php`; it uses a mocked provider and sends no email.

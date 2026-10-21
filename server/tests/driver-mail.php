@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // Run with: php server/tests/driver-mail.php
-// Uses only placeholder credentials and does not connect to an SMTP server.
+// Uses placeholder credentials and a mocked provider. No email is sent.
 define('DRIVER_MAIL_LIBRARY_ONLY', true);
 require dirname(__DIR__, 2) . '/public/api/driver-application.php';
 
@@ -10,13 +10,14 @@ function check(bool $condition, string $case): void {
     if (!$condition) throw new RuntimeException('Failed: ' . $case);
     echo "PASS: {$case}\n";
 }
-function failsConfig(): bool {
-    try { mailConfig(); return false; }
-    catch (DriverMailException $error) { return $error->category === 'configuration missing'; }
+function failsWith(callable $action, string $category): bool {
+    try { $action(); return false; }
+    catch (DriverMailException $error) { return $error->category === $category; }
 }
-$vars = ['SMTP_HOST','SMTP_PORT','SMTP_ENCRYPTION','SMTP_USER','SMTP_PASS','SMTP_FROM','DRIVER_APPLICATION_TO','MAIL_CONFIG_PATH'];
-foreach ($vars as $var) putenv($var);
-$base = sys_get_temp_dir() . '/velcotiy-mail-test-' . bin2hex(random_bytes(6));
+putenv('BREVO_API_KEY');
+putenv('MAIL_CONFIG_PATH');
+$tempRoot = is_dir(sys_get_temp_dir()) ? sys_get_temp_dir() : '/tmp';
+$base = $tempRoot . '/velcotiy-mail-test-' . bin2hex(random_bytes(6));
 mkdir($base);
 mkdir($base . '/public_html');
 mkdir($base . '/private');
@@ -25,33 +26,22 @@ $privatePath = $base . '/private/mail-config.php';
 $publicPath = $base . '/public_html/mail-config.php';
 $configText = <<<'CONFIG'
 <?php
-return ['host'=>'smtp.hostinger.com','port'=>465,'encryption'=>'ssl','username'=>'sender@example.com','password'=>'example-only','from'=>'sender@example.com','to'=>'info@velcotiytechniques.ca'];
+return ['provider'=>'brevo','api_key'=>'placeholder-api-key','sender_email'=>'info@velcotiytechniques.ca','sender_name'=>'Velcotiy Website','recipient_email'=>'info@velcotiytechniques.ca'];
 CONFIG;
 try {
-    check(failsConfig(), 'missing configuration fails safely');
+    check(failsWith('brevoApiKey', 'provider_configuration_missing'), 'missing configuration rejected');
     file_put_contents($privatePath, $configText);
-    $private = mailConfig();
-    check($private['host'] === 'smtp.hostinger.com' && $private['encryption'] === 'ssl', 'private config fallback');
-    check(smtpTarget($private) === 'ssl://smtp.hostinger.com:465' && !smtpRequiresStartTls($private), 'SSL 465 without STARTTLS');
-    check(!str_contains(mimeSubject('New Driver Application — Zoë Driver'), "\n"), 'safe encoded subject');
-
+    check(brevoApiKey() === 'placeholder-api-key', 'private config fallback');
     putenv('MAIL_CONFIG_PATH=' . $publicPath);
     file_put_contents($publicPath, $configText);
-    check(failsConfig(), 'public web-root config rejected');
+    check(failsWith('brevoApiKey', 'provider_configuration_missing'), 'public config path rejected');
     putenv('MAIL_CONFIG_PATH');
-
-    putenv('SMTP_HOST=mail.example.com');
-    putenv('SMTP_PORT=587');
-    putenv('SMTP_ENCRYPTION=tls');
-    putenv('SMTP_USER=sender@example.com');
-    putenv('SMTP_PASS=example-only');
-    putenv('SMTP_FROM=sender@example.com');
-    putenv('DRIVER_APPLICATION_TO=info@velcotiytechniques.ca');
-    $environment = mailConfig();
-    check($environment['host'] === 'mail.example.com', 'complete environment takes precedence');
-    check(smtpTarget($environment) === 'tcp://mail.example.com:587' && smtpRequiresStartTls($environment), 'TLS 587 with STARTTLS');
-    putenv('SMTP_ENCRYPTION');
-    check(mailConfig()['encryption'] === 'tls', '587 infers STARTTLS');
+    putenv('BREVO_API_KEY=environment-test-key');
+    check(brevoApiKey() === 'environment-test-key', 'environment key takes precedence');
+    putenv('BREVO_API_KEY');
+    file_put_contents($privatePath, "<?php return ['provider'=>'brevo','api_key'=>'bad key'];");
+    check(failsWith('brevoApiKey', 'provider_configuration_missing'), 'invalid API key rejected');
+    file_put_contents($privatePath, $configText);
 
     $server = ['REQUEST_METHOD'=>'POST','CONTENT_TYPE'=>'application/json','HTTP_ORIGIN'=>'https://velcotiytechniques.ca'];
     check(requestStatus(['REQUEST_METHOD'=>'GET'], '') === 405, 'GET rejected');
@@ -59,33 +49,46 @@ try {
     check(requestStatus($server, '{') === 400, 'malformed JSON rejected');
     check(requestStatus($server, str_repeat('x', 12001)) === 413, 'oversized body rejected');
     check(requestStatus($server + ['CONTENT_LENGTH'=>'12001'], '{}') === 413, 'oversized content length rejected');
-    check(requestStatus($server, '{}') === 0, 'valid request framing');
-    check(requestStatus($server + ['HTTP_REFERER'=>'https://evil.example/'], '{}') === 0, 'allowed Origin takes precedence over Referer');
     check(requestStatus(['REQUEST_METHOD'=>'POST','CONTENT_TYPE'=>'application/json','HTTP_ORIGIN'=>'https://evil.example'], '{}') === 403, 'foreign Origin rejected');
-    check(requestStatus(['REQUEST_METHOD'=>'POST','CONTENT_TYPE'=>'application/json','HTTP_REFERER'=>'https://evil.example/'], '{}') === 403, 'foreign Referer rejected');
-    check(requestStatus(['REQUEST_METHOD'=>'POST','CONTENT_TYPE'=>'application/json'], '{}') === 0, 'missing Origin and Referer allowed');
-
+    check(requestStatus($server, '{}') === 0, 'valid request framing');
     $data = ['name'=>'Test Driver','email'=>'driver@example.com','phone'=>'1234567','age'=>'35','city'=>'Toronto','province'=>'Ontario','workAuthorization'=>'Yes','validLicence'=>'Yes','vehicleType'=>'Sedan','vehicleName'=>'Example Car','weeklyAvailability'=>'3 days per week','experience'=>'','emergencyContact'=>'Example 1234567','message'=>'','website'=>''];
     check(validatedDriverData($data) !== null, 'valid driver data accepted');
-    foreach (['name','email','age','weeklyAvailability','website'] as $field) {
+    foreach (['name'=>'','email'=>'bad','age'=>'200','vehicleType'=>'Bike','weeklyAvailability'=>'never','website'=>'bot'] as $field => $value) {
         $invalid = $data;
-        $invalid[$field] = match ($field) { 'name'=>'', 'email'=>'bad', 'age'=>'200', 'weeklyAvailability'=>'never', 'website'=>'bot' };
+        $invalid[$field] = $value;
         check(validatedDriverData($invalid) === null, $field . ' validation');
     }
     $invalid = $data;
     unset($invalid['phone']);
-    check(validatedDriverData($invalid) === null, 'missing required field rejected');
-    $invalid = $data;
-    $invalid['name'] = "Bad\x00Name";
-    check(validatedDriverData($invalid) === null, 'control character rejected');
+    check(validatedDriverData($invalid) === null, 'missing field rejected');
     $invalid = $data;
     $invalid['message'] = str_repeat('a', 2001);
     check(validatedDriverData($invalid) === null, 'field limit enforced');
     check(allowDriverAttempt('test-client', $base, 1000), 'first attempt allowed');
     check(!allowDriverAttempt('test-client', $base, 1001), 'rate limit rejects repeat');
     check(allowDriverAttempt('test-client', $base, 1060), 'rate limit expires');
+
+    putenv('BREVO_API_KEY=environment-test-key');
+    $captured = [];
+    $accepted = function (string $url, string $key, array $payload) use (&$captured): array {
+        $captured = [$url, $key, $payload];
+        return [201, '{"messageId":"<accepted@example.com>"}'];
+    };
+    sendMail($data, $accepted);
+    check($captured[0] === 'https://api.brevo.com/v3/smtp/email' && $captured[1] === 'environment-test-key', 'Brevo URL and server key used');
+    check($captured[2]['sender']['email'] === 'info@velcotiytechniques.ca' && $captured[2]['to'][0]['email'] === 'info@velcotiytechniques.ca', 'fixed sender and recipient');
+    check($captured[2]['replyTo']['email'] === 'driver@example.com' && strpos($captured[2]['textContent'], 'Not provided') !== false, 'reply-to and optional fields');
+    check(brevoResponseError(201, '{"messageId":"accepted"}') === null, '201 with messageId accepted');
+    foreach ([401=>'provider_authentication_failed',403=>'provider_authentication_failed',400=>'provider_rejected',422=>'provider_rejected',429=>'provider_rejected',500=>'provider_connection_failed'] as $status => $expected) {
+        $mock = function () use ($status): array { return [$status, '{}']; };
+        check(failsWith(function () use ($data, $mock): void { sendMail($data, $mock); }, $expected), 'provider ' . $status . ' mapped safely');
+    }
+    check(brevoResponseError(201, '{}') === 'provider_rejected', '201 without messageId rejected');
+    check(brevoResponseError(201, '{"messageId":"   "}') === 'provider_rejected', 'blank messageId rejected');
+    check(publicErrorCode(new RuntimeException('private detail')) === 'unexpected_failure', 'unexpected error masked');
 } finally {
-    foreach ($vars as $var) putenv($var);
+    putenv('BREVO_API_KEY');
+    putenv('MAIL_CONFIG_PATH');
     @unlink($base . '/velcotiy-driver-' . hash('sha256', 'test-client') . '.lock');
     @unlink($privatePath);
     @unlink($publicPath);

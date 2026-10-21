@@ -5,10 +5,10 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
-function respond(int $status, bool $sent = false, ?string $errorCode = null): never {
+function respond(int $status, bool $sent = false, ?string $errorCode = null): void {
     http_response_code($status);
     $body = ['sent' => $sent];
-    $safeCodes = ['configuration_missing', 'smtp_connection_failed', 'smtp_authentication_failed', 'smtp_delivery_rejected', 'rate_limit_unavailable', 'rate_limited', 'validation_failed', 'invalid_request', 'unexpected_failure'];
+    $safeCodes = ['invalid_request', 'validation_failed', 'rate_limited', 'rate_limit_unavailable', 'provider_configuration_missing', 'provider_connection_failed', 'provider_authentication_failed', 'provider_rejected', 'unexpected_failure'];
     if (!$sent && $errorCode !== null) {
         $body['error'] = in_array($errorCode, $safeCodes, true) ? $errorCode : 'unexpected_failure';
     }
@@ -16,168 +16,109 @@ function respond(int $status, bool $sent = false, ?string $errorCode = null): ne
     exit;
 }
 final class DriverMailException extends RuntimeException {
-    public function __construct(public readonly string $category, public readonly ?int $smtpCode = null) {
+    public $category;
+    public $providerStatus;
+    public function __construct(string $category, ?int $providerStatus = null) {
         parent::__construct($category);
+        $this->category = $category;
+        $this->providerStatus = $providerStatus;
     }
 }
 function publicErrorCode(Throwable $exception): string {
     if (!$exception instanceof DriverMailException) return 'unexpected_failure';
-    return match ($exception->category) {
-        'configuration missing' => 'configuration_missing',
-        'SMTP connection failed' => 'smtp_connection_failed',
-        'SMTP authentication failed' => 'smtp_authentication_failed',
-        'SMTP delivery rejected' => 'smtp_delivery_rejected',
-        'rate limit unavailable' => 'rate_limit_unavailable',
-        default => 'unexpected_failure',
-    };
+    $allowed = ['rate_limit_unavailable', 'provider_configuration_missing', 'provider_connection_failed', 'provider_authentication_failed', 'provider_rejected'];
+    return in_array($exception->category, $allowed, true) ? $exception->category : 'unexpected_failure';
 }
-function mailConfig(): array {
-    $names = ['host'=>'SMTP_HOST', 'port'=>'SMTP_PORT', 'encryption'=>'SMTP_ENCRYPTION', 'username'=>'SMTP_USER', 'password'=>'SMTP_PASS', 'from'=>'SMTP_FROM', 'to'=>'DRIVER_APPLICATION_TO'];
-    $config = [];
-    foreach ($names as $key => $name) {
-        $value = getenv($name);
-        if ($value !== false && $value !== '') $config[$key] = $value;
-    }
-    $required = ['host', 'port', 'username', 'password', 'from', 'to'];
-    if (array_diff($required, array_keys($config))) {
+function brevoApiKey(): string {
+    $key = getenv('BREVO_API_KEY');
+    if ($key === false || $key === '') {
         $webRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '') ?: realpath(__DIR__ . '/../..');
         $codeRoot = realpath(__DIR__ . '/../..');
-        if ($webRoot === false || $codeRoot === false) throw new DriverMailException('configuration missing');
+        if ($webRoot === false || $codeRoot === false) throw new DriverMailException('provider_configuration_missing');
         $configuredPath = getenv('MAIL_CONFIG_PATH');
         $path = $configuredPath !== false && $configuredPath !== ''
             ? $configuredPath
             : dirname($webRoot) . '/private/mail-config.php';
-        if (!str_starts_with($path, '/') || str_contains($path, '://')) throw new DriverMailException('configuration missing');
+        if (substr($path, 0, 1) !== '/' || strpos($path, '://') !== false) throw new DriverMailException('provider_configuration_missing');
         $resolved = realpath($path);
-        if ($resolved === false || !is_file($resolved) || !is_readable($resolved)) throw new DriverMailException('configuration missing');
+        if ($resolved === false || !is_file($resolved) || !is_readable($resolved)) throw new DriverMailException('provider_configuration_missing');
         foreach ([$webRoot, $codeRoot] as $root) {
-            if ($resolved === $root || str_starts_with($resolved, $root . DIRECTORY_SEPARATOR)) {
-                throw new DriverMailException('configuration missing');
+            if ($resolved === $root || strpos($resolved, $root . DIRECTORY_SEPARATOR) === 0) {
+                throw new DriverMailException('provider_configuration_missing');
             }
         }
-        $fileConfig = require $resolved;
-        if (!is_array($fileConfig)) throw new DriverMailException('configuration missing');
-        foreach ($names as $key => $_) {
-            if (!isset($config[$key]) && isset($fileConfig[$key])) $config[$key] = $fileConfig[$key];
+        $config = require $resolved;
+        if (!is_array($config) || ($config['provider'] ?? null) !== 'brevo'
+            || (isset($config['sender_email']) && $config['sender_email'] !== 'info@velcotiytechniques.ca')
+            || (isset($config['recipient_email']) && $config['recipient_email'] !== 'info@velcotiytechniques.ca')
+            || (isset($config['sender_name']) && $config['sender_name'] !== 'Velcotiy Website')) {
+            throw new DriverMailException('provider_configuration_missing');
         }
+        $key = $config['api_key'] ?? null;
     }
-    if (!isset($config['encryption'])) {
-        $config['encryption'] = (string)($config['port'] ?? '') === '465' ? 'ssl' : 'tls';
+    if (!is_string($key) || !preg_match('/^[!-~]{1,512}$/D', $key)) {
+        throw new DriverMailException('provider_configuration_missing');
     }
-    $host = $config['host'] ?? null;
-    $port = $config['port'] ?? null;
-    $port = filter_var($port, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]);
-    if (!is_string($host) || !preg_match('/^[a-zA-Z0-9.-]+$/D', $host) || !$port
-        || !in_array($config['encryption'], ['ssl', 'tls'], true)
-        || !is_string($config['username'] ?? null) || trim($config['username']) === ''
-        || preg_match('/[\r\n]/', $config['username'])
-        || !is_string($config['password'] ?? null) || $config['password'] === ''
-        || !is_string($config['from'] ?? null) || !is_string($config['to'] ?? null)
-        || !filter_var($config['from'], FILTER_VALIDATE_EMAIL)
-        || preg_match('/[\r\n<>]/', $config['from'])
-        || $config['to'] !== 'info@velcotiytechniques.ca') {
-        throw new DriverMailException('configuration missing');
+    return $key;
+}
+function driverEmailPayload(array $data): array {
+    $labels = ['name'=>'Full Name','email'=>'Email','phone'=>'Phone','age'=>'Age','city'=>'City','province'=>'Province','workAuthorization'=>'Legally authorized to work in Canada','validLicence'=>'Valid driver’s licence','vehicleType'=>'Vehicle Type','vehicleName'=>'Vehicle Name','weeklyAvailability'=>'Weekly Availability','experience'=>'Delivery Experience','emergencyContact'=>'Emergency Contact','message'=>'Additional Notes'];
+    $body = "Driver Application\n\n";
+    foreach ($labels as $key => $label) {
+        $body .= $label . ': ' . ($data[$key] !== '' ? $data[$key] : 'Not provided') . "\n";
     }
-    $config['port'] = $port;
-    return $config;
+    $body .= "\nSubmitted (UTC): " . gmdate('Y-m-d H:i:s') . "\n";
+    return [
+        'sender' => ['email' => 'info@velcotiytechniques.ca', 'name' => 'Velcotiy Website'],
+        'to' => [['email' => 'info@velcotiytechniques.ca']],
+        'replyTo' => ['email' => $data['email']],
+        'subject' => 'New Driver Application — ' . str_replace(["\r", "\n"], ' ', $data['name']),
+        'textContent' => $body,
+    ];
 }
-function smtpReply($socket, array $codes, string $category): void {
-    do {
-        $line = fgets($socket, 1024);
-        if ($line === false || !preg_match('/^([0-9]{3})([ -])/', $line, $parts)) {
-            throw new DriverMailException($category);
-        }
-    } while ($parts[2] === '-');
-    if (!in_array((int)$parts[1], $codes, true)) {
-        throw new DriverMailException($category, (int)$parts[1]);
-    }
-}
-function smtpCommand($socket, string $command, array $codes, string $category): void {
-    $wire = $command . "\r\n";
-    while ($wire !== '') {
-        $written = @fwrite($socket, $wire);
-        if ($written === false || $written === 0) throw new DriverMailException($category);
-        $wire = substr($wire, $written);
-    }
-    smtpReply($socket, $codes, $category);
-}
-function address(string $value): string {
-    if (!filter_var($value, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n<>]/', $value)) {
-        throw new DriverMailException('configuration missing');
-    }
-    return $value;
-}
-function mimeSubject(string $subject): string {
-    $chars = preg_split('//u', $subject, -1, PREG_SPLIT_NO_EMPTY);
-    if ($chars === false) throw new DriverMailException('SMTP delivery rejected');
-    $chunks = [];
-    $chunk = '';
-    foreach ($chars as $char) {
-        if (strlen($chunk . $char) > 45) {
-            $chunks[] = '=?UTF-8?B?' . base64_encode($chunk) . '?=';
-            $chunk = '';
-        }
-        $chunk .= $char;
-    }
-    if ($chunk !== '') $chunks[] = '=?UTF-8?B?' . base64_encode($chunk) . '?=';
-    return implode("\r\n ", $chunks);
-}
-function smtpTarget(array $config): string {
-    return ($config['encryption'] === 'ssl' ? 'ssl' : 'tcp') . '://' . $config['host'] . ':' . $config['port'];
-}
-function smtpRequiresStartTls(array $config): bool {
-    return $config['encryption'] === 'tls';
-}
-function sendMail(array $data): void {
-    $config = mailConfig();
-    $from = $config['from'];
-    $to = $config['to'];
-    $socket = @stream_socket_client(smtpTarget($config), $error, $message, 10, STREAM_CLIENT_CONNECT);
-    if ($socket === false) throw new DriverMailException('SMTP connection failed');
-    stream_set_timeout($socket, 10);
+function brevoPost(string $url, string $apiKey, array $payload): array {
+    if (!function_exists('curl_init')) throw new DriverMailException('provider_connection_failed');
+    $handle = curl_init($url);
+    if ($handle === false) throw new DriverMailException('provider_connection_failed');
     try {
-        smtpReply($socket, [220], 'SMTP connection failed');
-        smtpCommand($socket, 'EHLO velcotiytechniques.ca', [250], 'SMTP connection failed');
-        if (smtpRequiresStartTls($config)) {
-            smtpCommand($socket, 'STARTTLS', [220], 'SMTP connection failed');
-            if (!@stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                throw new DriverMailException('SMTP connection failed');
-            }
-            smtpCommand($socket, 'EHLO velcotiytechniques.ca', [250], 'SMTP connection failed');
-        }
-        smtpCommand($socket, 'AUTH LOGIN', [334], 'SMTP authentication failed');
-        smtpCommand($socket, base64_encode($config['username']), [334], 'SMTP authentication failed');
-        smtpCommand($socket, base64_encode($config['password']), [235], 'SMTP authentication failed');
-        smtpCommand($socket, 'MAIL FROM:<' . $from . '>', [250], 'SMTP delivery rejected');
-        smtpCommand($socket, 'RCPT TO:<' . $to . '>', [250, 251], 'SMTP delivery rejected');
-        smtpCommand($socket, 'DATA', [354], 'SMTP delivery rejected');
-        $labels = ['name'=>'Full Name','email'=>'Email','phone'=>'Phone','age'=>'Age','city'=>'City','province'=>'Province','workAuthorization'=>'Legally authorized to work in Canada','validLicence'=>'Valid driver’s licence','vehicleType'=>'Vehicle Type','vehicleName'=>'Vehicle Name','weeklyAvailability'=>'Weekly Availability','experience'=>'Delivery Experience','emergencyContact'=>'Emergency Contact','message'=>'Additional Notes'];
-        $body = "Driver Application\n\n";
-        foreach ($labels as $key => $label) {
-            $body .= $label . ': ' . ($data[$key] !== '' ? $data[$key] : 'Not provided') . "\n";
-        }
-        $body .= "\nSubmitted (UTC): " . gmdate('Y-m-d H:i:s') . "\n";
-        $subject = 'New Driver Application — ' . $data['name'];
-        $headers = [
-            'From: Velcotiy Website <' . $from . '>',
-            'To: <' . $to . '>',
-            'Reply-To: <' . address($data['email']) . '>',
-            'Subject: ' . mimeSubject($subject),
-            'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000',
-            'MIME-Version: 1.0',
-            'Content-Type: text/plain; charset=UTF-8',
-            'Content-Transfer-Encoding: base64',
-        ];
-        $encoded = chunk_split(base64_encode($body), 76, "\r\n");
-        $message = implode("\r\n", $headers) . "\r\n\r\n" . $encoded;
-        smtpCommand($socket, $message . '.', [250], 'SMTP delivery rejected');
-        // The message is accepted after DATA; a QUIT failure must not turn success into an error.
-        @fwrite($socket, "QUIT\r\n");
+        $json = json_encode($payload, JSON_THROW_ON_ERROR);
+        $configured = curl_setopt_array($handle, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => ['api-key: ' . $apiKey, 'Content-Type: application/json', 'Accept: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+        ]);
+        if (!$configured) throw new DriverMailException('provider_connection_failed');
+        $response = curl_exec($handle);
+        $status = (int)curl_getinfo($handle, CURLINFO_HTTP_CODE);
+        if ($response === false) throw new DriverMailException('provider_connection_failed');
+        return [$status, $response];
     } finally {
-        fclose($socket);
+        curl_close($handle);
     }
 }
-
+function brevoResponseError(int $status, string $response): ?string {
+    if ($status === 201) {
+        $decoded = json_decode($response, true);
+        if (is_array($decoded) && isset($decoded['messageId']) && is_string($decoded['messageId']) && trim($decoded['messageId']) !== '') return null;
+        return 'provider_rejected';
+    }
+    if ($status === 401 || $status === 403) return 'provider_authentication_failed';
+    if ($status === 0 || $status >= 500) return 'provider_connection_failed';
+    return 'provider_rejected';
+}
+function sendMail(array $data, ?callable $transport = null): void {
+    $apiKey = brevoApiKey();
+    $post = $transport ?? 'brevoPost';
+    [$status, $response] = $post('https://api.brevo.com/v3/smtp/email', $apiKey, driverEmailPayload($data));
+    $error = brevoResponseError($status, $response);
+    if ($error !== null) throw new DriverMailException($error, $status);
+}
 function requestStatus(array $server, string $raw): int {
     if (($server['REQUEST_METHOD'] ?? '') !== 'POST') return 405;
     $origin = $server['HTTP_ORIGIN'] ?? '';
@@ -210,14 +151,14 @@ function validatedDriverData(array $data): ?array {
 function allowDriverAttempt(string $clientIp, ?string $directory = null, ?int $now = null): bool {
     $path = ($directory ?? sys_get_temp_dir()) . '/velcotiy-driver-' . hash('sha256', $clientIp) . '.lock';
     $handle = fopen($path, 'c+');
-    if ($handle === false || !flock($handle, LOCK_EX)) throw new DriverMailException('rate limit unavailable');
+    if ($handle === false || !flock($handle, LOCK_EX)) throw new DriverMailException('rate_limit_unavailable');
     try {
-        $now ??= time();
+        $now = $now ?? time();
         $lastAttempt = (int)stream_get_contents($handle);
         if ($now - $lastAttempt < 60) return false;
         rewind($handle);
         if (!ftruncate($handle, 0) || fwrite($handle, (string)$now) === false || !fflush($handle)) {
-            throw new DriverMailException('rate limit unavailable');
+            throw new DriverMailException('rate_limit_unavailable');
         }
         return true;
     } finally {
@@ -237,17 +178,11 @@ $data = validatedDriverData(json_decode($raw, true));
 if ($data === null) respond(400, false, 'validation_failed');
 try {
     if (!allowDriverAttempt($_SERVER['REMOTE_ADDR'] ?? 'unknown')) respond(429, false, 'rate_limited');
-} catch (Throwable $exception) {
-    $errorCode = publicErrorCode($exception);
-    error_log('driver-mail ' . $errorCode);
-    respond(503, false, $errorCode);
-}
-try {
     sendMail($data);
     respond(200, true);
 } catch (Throwable $exception) {
-    $category = $exception instanceof DriverMailException ? $exception->category : 'unexpected failure';
-    $code = $exception instanceof DriverMailException ? $exception->smtpCode : null;
-    error_log('driver-mail ' . $category . ($code !== null ? ' smtp-code=' . $code : ''));
-    respond(503, false, publicErrorCode($exception));
+    $error = publicErrorCode($exception);
+    $status = $exception instanceof DriverMailException ? $exception->providerStatus : null;
+    error_log('driver-mail ' . $error . ($status !== null ? ' provider-status=' . $status : ''));
+    respond(503, false, $error);
 }
