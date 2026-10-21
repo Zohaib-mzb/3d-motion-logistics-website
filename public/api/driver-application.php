@@ -5,15 +5,31 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
-function respond(int $status, bool $sent = false): never {
+function respond(int $status, bool $sent = false, ?string $errorCode = null): never {
     http_response_code($status);
-    echo json_encode(['sent' => $sent]);
+    $body = ['sent' => $sent];
+    $safeCodes = ['configuration_missing', 'smtp_connection_failed', 'smtp_authentication_failed', 'smtp_delivery_rejected', 'rate_limit_unavailable', 'rate_limited', 'validation_failed', 'invalid_request', 'unexpected_failure'];
+    if (!$sent && $errorCode !== null) {
+        $body['error'] = in_array($errorCode, $safeCodes, true) ? $errorCode : 'unexpected_failure';
+    }
+    echo json_encode($body);
     exit;
 }
 final class DriverMailException extends RuntimeException {
     public function __construct(public readonly string $category, public readonly ?int $smtpCode = null) {
         parent::__construct($category);
     }
+}
+function publicErrorCode(Throwable $exception): string {
+    if (!$exception instanceof DriverMailException) return 'unexpected_failure';
+    return match ($exception->category) {
+        'configuration missing' => 'configuration_missing',
+        'SMTP connection failed' => 'smtp_connection_failed',
+        'SMTP authentication failed' => 'smtp_authentication_failed',
+        'SMTP delivery rejected' => 'smtp_delivery_rejected',
+        'rate limit unavailable' => 'rate_limit_unavailable',
+        default => 'unexpected_failure',
+    };
 }
 function mailConfig(): array {
     $names = ['host'=>'SMTP_HOST', 'port'=>'SMTP_PORT', 'encryption'=>'SMTP_ENCRYPTION', 'username'=>'SMTP_USER', 'password'=>'SMTP_PASS', 'from'=>'SMTP_FROM', 'to'=>'DRIVER_APPLICATION_TO'];
@@ -211,19 +227,20 @@ function allowDriverAttempt(string $clientIp, ?string $directory = null, ?int $n
 }
 if (defined('DRIVER_MAIL_LIBRARY_ONLY')) return;
 $raw = file_get_contents('php://input', false, null, 0, 12001);
-if ($raw === false) respond(413);
+if ($raw === false) respond(413, false, 'invalid_request');
 $status = requestStatus($_SERVER, $raw);
 if ($status !== 0) {
     if ($status === 405) header('Allow: POST');
-    respond($status);
+    respond($status, false, 'invalid_request');
 }
 $data = validatedDriverData(json_decode($raw, true));
-if ($data === null) respond(400);
+if ($data === null) respond(400, false, 'validation_failed');
 try {
-    if (!allowDriverAttempt($_SERVER['REMOTE_ADDR'] ?? 'unknown')) respond(429);
+    if (!allowDriverAttempt($_SERVER['REMOTE_ADDR'] ?? 'unknown')) respond(429, false, 'rate_limited');
 } catch (Throwable $exception) {
-    error_log('driver-mail rate limit unavailable');
-    respond(503);
+    $errorCode = publicErrorCode($exception);
+    error_log('driver-mail ' . $errorCode);
+    respond(503, false, $errorCode);
 }
 try {
     sendMail($data);
@@ -232,5 +249,5 @@ try {
     $category = $exception instanceof DriverMailException ? $exception->category : 'unexpected failure';
     $code = $exception instanceof DriverMailException ? $exception->smtpCode : null;
     error_log('driver-mail ' . $category . ($code !== null ? ' smtp-code=' . $code : ''));
-    respond(503);
+    respond(503, false, publicErrorCode($exception));
 }
