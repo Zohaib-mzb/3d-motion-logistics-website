@@ -29,8 +29,8 @@ function publicErrorCode(Throwable $exception): string {
     $allowed = ['rate_limit_unavailable', 'provider_configuration_missing', 'provider_connection_failed', 'provider_authentication_failed', 'provider_rejected'];
     return in_array($exception->category, $allowed, true) ? $exception->category : 'unexpected_failure';
 }
-function brevoApiKey(): string {
-    $key = getenv('BREVO_API_KEY');
+function resendApiKey(): string {
+    $key = getenv('RESEND_API_KEY');
     if ($key === false || $key === '') {
         $webRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '') ?: realpath(__DIR__ . '/../..');
         $codeRoot = realpath(__DIR__ . '/../..');
@@ -48,7 +48,7 @@ function brevoApiKey(): string {
             }
         }
         $config = require $resolved;
-        if (!is_array($config) || ($config['provider'] ?? null) !== 'brevo'
+        if (!is_array($config) || ($config['provider'] ?? null) !== 'resend'
             || (isset($config['sender_email']) && $config['sender_email'] !== 'info@velcotiytechniques.ca')
             || (isset($config['recipient_email']) && $config['recipient_email'] !== 'info@velcotiytechniques.ca')
             || (isset($config['sender_name']) && $config['sender_name'] !== 'Velcotiy Website')) {
@@ -69,14 +69,14 @@ function driverEmailPayload(array $data): array {
     }
     $body .= "\nSubmitted (UTC): " . gmdate('Y-m-d H:i:s') . "\n";
     return [
-        'sender' => ['email' => 'info@velcotiytechniques.ca', 'name' => 'Velcotiy Website'],
-        'to' => [['email' => 'info@velcotiytechniques.ca']],
-        'replyTo' => ['email' => $data['email']],
+        'from' => 'Velcotiy Website <info@velcotiytechniques.ca>',
+        'to' => ['info@velcotiytechniques.ca'],
+        'reply_to' => $data['email'],
         'subject' => 'New Driver Application — ' . str_replace(["\r", "\n"], ' ', $data['name']),
-        'textContent' => $body,
+        'text' => $body,
     ];
 }
-function brevoPost(string $url, string $apiKey, array $payload): array {
+function resendPost(string $url, string $apiKey, array $payload): array {
     if (!function_exists('curl_init')) throw new DriverMailException('provider_connection_failed');
     $handle = curl_init($url);
     if ($handle === false) throw new DriverMailException('provider_connection_failed');
@@ -85,7 +85,7 @@ function brevoPost(string $url, string $apiKey, array $payload): array {
         $configured = curl_setopt_array($handle, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $json,
-            CURLOPT_HTTPHEADER => ['api-key: ' . $apiKey, 'Content-Type: application/json', 'Accept: application/json'],
+            CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $apiKey, 'Content-Type: application/json', 'Accept: application/json'],
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CONNECTTIMEOUT => 4,
             CURLOPT_TIMEOUT => 10,
@@ -102,21 +102,23 @@ function brevoPost(string $url, string $apiKey, array $payload): array {
         curl_close($handle);
     }
 }
-function brevoResponseError(int $status, string $response): ?string {
-    if ($status === 201) {
+function resendResponseError(int $status, string $response): ?string {
+    if ($status === 200 || $status === 201) {
         $decoded = json_decode($response, true);
-        if (is_array($decoded) && isset($decoded['messageId']) && is_string($decoded['messageId']) && trim($decoded['messageId']) !== '') return null;
-        return 'provider_rejected';
+        if (is_array($decoded) && isset($decoded['id']) && is_string($decoded['id']) && trim($decoded['id']) !== '') return null;
+        return 'unexpected_failure';
     }
     if ($status === 401 || $status === 403) return 'provider_authentication_failed';
+    if ($status === 400 || $status === 422) return 'provider_rejected';
+    if ($status === 429) return 'rate_limited';
     if ($status === 0 || $status >= 500) return 'provider_connection_failed';
-    return 'provider_rejected';
+    return 'unexpected_failure';
 }
 function sendMail(array $data, ?callable $transport = null): void {
-    $apiKey = brevoApiKey();
-    $post = $transport ?? 'brevoPost';
-    [$status, $response] = $post('https://api.brevo.com/v3/smtp/email', $apiKey, driverEmailPayload($data));
-    $error = brevoResponseError($status, $response);
+    $apiKey = resendApiKey();
+    $post = $transport ?? 'resendPost';
+    [$status, $response] = $post('https://api.resend.com/emails', $apiKey, driverEmailPayload($data));
+    $error = resendResponseError($status, $response);
     if ($error !== null) throw new DriverMailException($error, $status);
 }
 function requestStatus(array $server, string $raw): int {
