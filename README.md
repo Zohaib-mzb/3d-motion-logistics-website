@@ -24,7 +24,7 @@ The website focuses on:
 - direct-link routing on Hostinger
 - production-focused frontend performance
 
-The project uses a lightweight frontend with a small PHP endpoint for driver application email. Contact and quote requests use email drafts.
+The project is intentionally lightweight and frontend-first. It avoids unnecessary backend infrastructure while still supporting quote requests, contact workflows, and driver applications.
 
 ---
 
@@ -43,7 +43,7 @@ The project uses a lightweight frontend with a small PHP endpoint for driver app
 - Canadian delivery coverage visualization
 - Business / warehouse solutions page
 - Driver application form with validation
-- Direct driver application email through a PHP endpoint
+- WhatsApp application handoff for drivers
 - Multi-step quote request form
 - Contact form with email-draft workflow
 - Careers page
@@ -156,7 +156,9 @@ The driver form collects:
 - emergency contact
 - additional notes
 
-After validation, the website posts the application to `/api/driver-application.php`. The endpoint validates it and sends it through the Resend API to `info@velcotiytechniques.ca`. The site shows success only after Resend returns HTTP 200 or 201 with a nonempty email ID.
+After validation, the website prepares a structured WhatsApp message containing the application details.
+
+The applicant reviews the message and presses **Send** inside WhatsApp.
 
 No driver application data is intentionally stored by this website.
 
@@ -239,7 +241,7 @@ Performance decisions include:
 - Vite production bundling
 - reduced-motion support
 - removal of missing/unused media references
-- lightweight frontend with a small PHP mail endpoint
+- minimal frontend-only architecture
 
 ---
 
@@ -386,13 +388,13 @@ public/
 
 This repository contains public-facing frontend code for a client business website.
 
-- A Resend API key is required server-side for driver application email and must never be exposed in frontend code.
+- No private API keys are required by the site.
 - No backend database is used for public forms.
 - Local environment files are ignored by Git.
 - `node_modules/`, `dist/`, logs, and OS metadata are excluded from Git.
 - Public business contact information may exist in frontend source because it is intentionally displayed on the public website.
 - Contact and quote form data is not stored by the application.
-- Driver application data is processed by the PHP endpoint and sent by email; this website does not intentionally persist it.
+- Driver application data is prepared locally and handed off to WhatsApp for the applicant to send.
 - Secrets, passwords, access tokens, private keys, and credentials should never be committed to this repository.
 
 ---
@@ -414,7 +416,7 @@ The website is also manually tested for:
 - direct route loading
 - navigation
 - forms
-- driver application submission and failure state
+- WhatsApp handoff
 - quote flow
 - SPA routing
 - 404 handling
@@ -472,15 +474,3 @@ This project was developed for **Velcotiy Techniques Inc** as a production busin
 This repository is publicly viewable for portfolio and engineering-reference purposes.
 
 The Velcotiy Techniques Inc brand, logo, generated visuals, business content, and proprietary assets are not automatically licensed for reuse.
-
----
-
-## Driver application email on Hostinger
-
-The driver form posts JSON to `/api/driver-application.php` on the same origin. The PHP endpoint validates the application and sends it to `https://api.resend.com/emails` over HTTPS using PHP cURL. It shows success only when Resend returns HTTP 200 or 201 with a nonempty `id`. That confirms provider acceptance, not guaranteed inbox placement. The frontend does not receive the API key or send applicant data to analytics or URLs; the website does not store applications. Resend processes the application for delivery.
-
-Deploy the **contents** of `dist/`, including `api/driver-application.php` and `.htaccess`, to a PHP 7.4+ enabled Hostinger `public_html` with the PHP cURL extension enabled. The existing SPA fallback continues to serve `/drivers`, while the physical PHP file handles the API request. Contact and Quote still open email drafts; general WhatsApp links are unchanged.
-
-The endpoint reads `RESEND_API_KEY` from the server environment first. If it is absent, it reads a private PHP config file. By default, this is `../private/mail-config.php` relative to PHP's `DOCUMENT_ROOT`: for `/home/USERNAME/domains/velcotiytechniques.ca/public_html`, use `/home/USERNAME/domains/velcotiytechniques.ca/private/mail-config.php`. The Hostinger private file is already configured outside `public_html`; `server/mail-config.example.php` documents its structure. If the file is elsewhere outside `public_html`, set server-side `MAIL_CONFIG_PATH` to its absolute path. Paths inside the public web root are rejected. The example file is not deployed by Vite. Never put the real key in Git, `public_html`, or a `VITE_*` variable.
-
-The sending domain `velcotiytechniques.ca` must be verified in Resend; the domain and API key are already configured on Hostinger. A test GET of `/api/driver-application.php` should return HTTP 405 and `invalid_request`; this checks the route, **not** email delivery. After deployment, submit one clearly marked test application at `/drivers`, inspect the response in Network tools, and confirm receipt in the mailbox or spam folder. The test suite can be run with `php server/tests/driver-mail.php`; it uses a mocked provider and sends no email.

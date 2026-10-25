@@ -16,3 +16,36 @@ export function createInquiryMailto(kind:FormKind,data:Record<string,string>):st
 export function submitInquiry(kind:FormKind,data:Record<string,string>):void {
   window.location.href=createInquiryMailto(kind,data);
 }
+
+export type DriverApplication = {
+  name:string; email:string; phone:string; age:string; city:string; province:string;
+  workAuthorization:string; validLicence:string; vehicleType:string; vehicleName:string;
+  weeklyAvailability:string; experience:string; emergencyContact:string; message:string;
+};
+
+export function createDriverWhatsAppUrl(data:DriverApplication):string {
+  const lines=[
+    'Hello Velcotiy,',
+    '',
+    'I would like to apply as a driver.',
+    '',
+    'DRIVER APPLICATION',
+    '',
+    `Name: ${data.name.trim()}`,
+    `Email: ${data.email.trim()}`,
+    `Phone: ${data.phone.trim()}`,
+    `Age: ${data.age.trim()}`,
+    `Location: ${data.city.trim()}, ${data.province.trim()}`,
+    `Legally authorized to work in Canada: ${data.workAuthorization}`,
+    `Valid driver’s licence: ${data.validLicence}`,
+    `Vehicle type: ${data.vehicleType}`,
+    `Vehicle name: ${data.vehicleName.trim()}`,
+    `Weekly availability: ${data.weeklyAvailability}`,
+    `Delivery experience: ${data.experience.trim() || 'Not provided'}`,
+    `Emergency contact: ${data.emergencyContact.trim()}`,
+    `Additional notes: ${data.message.trim() || 'Not provided'}`,
+    '',
+    'Thank you.',
+  ];
+  return `https://wa.me/${siteConfig.whatsappNumber}?text=${encodeURIComponent(lines.join('\n'))}`;
+}
